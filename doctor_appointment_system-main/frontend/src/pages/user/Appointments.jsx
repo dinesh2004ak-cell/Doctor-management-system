@@ -20,6 +20,7 @@ const UserAppointments = () => {
   const [activeTab, setActiveTab] = useState('upcoming');
   const [pagination, setPagination] = useState(null);
   const [page, setPage] = useState(1);
+  const [reschedulingAppointment, setReschedulingAppointment] = useState(null);
 
   useEffect(() => {
     fetchAppointments();
@@ -58,6 +59,21 @@ const UserAppointments = () => {
       fetchAppointments();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to cancel appointment');
+    }
+  };
+
+  const handleReschedule = async (appointmentId, newDate, newStartTime, newEndTime) => {
+    try {
+      await appointmentAPI.reschedule(appointmentId, {
+        newDate,
+        newStartTime,
+        newEndTime
+      });
+      toast.success('Appointment rescheduled successfully! Awaiting doctor confirmation.');
+      setReschedulingAppointment(null);
+      fetchAppointments();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to reschedule appointment');
     }
   };
 
@@ -106,6 +122,7 @@ const UserAppointments = () => {
                   key={appointment._id} 
                   appointment={appointment}
                   onCancel={handleCancel}
+                  onReschedule={(apt) => setReschedulingAppointment(apt)}
                 />
               ))}
             </div>
@@ -146,12 +163,140 @@ const UserAppointments = () => {
           )}
         </div>
       </div>
+
+      {/* Reschedule Modal */}
+      {reschedulingAppointment && (
+        <RescheduleModal
+          appointment={reschedulingAppointment}
+          onClose={() => setReschedulingAppointment(null)}
+          onConfirm={handleReschedule}
+        />
+      )}
+    </div>
+  );
+};
+
+// Reschedule Modal Component
+const RescheduleModal = ({ appointment, onClose, onConfirm }) => {
+  const doctor = appointment.doctorId;
+  const doctorUser = doctor?.userId;
+  const [selectedDate, setSelectedDate] = useState('');
+  const [availableSlots, setAvailableSlots] = useState([]);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleDateChange = async (dateStr) => {
+    setSelectedDate(dateStr);
+    setSelectedSlot(null);
+    if (!dateStr) {
+      setAvailableSlots([]);
+      return;
+    }
+    setLoadingSlots(true);
+    try {
+      const docId = doctor?._id || doctor;
+      const res = await appointmentAPI.getAvailableSlots(docId, dateStr);
+      setAvailableSlots(res.data.data.slots || []);
+    } catch (err) {
+      toast.error('Failed to load slots for this date');
+      setAvailableSlots([]);
+    } finally {
+      setLoadingSlots(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (!selectedDate || !selectedSlot) {
+      toast.error('Please select a date and time slot');
+      return;
+    }
+    setSubmitting(true);
+    await onConfirm(appointment._id, selectedDate, selectedSlot.start, selectedSlot.end);
+    setSubmitting(false);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-800">Reschedule Appointment</h3>
+            <p className="text-xs text-slate-500">Dr. {doctorUser?.name || 'Doctor'} • {doctor?.specialty}</p>
+          </div>
+          <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Pick a New Date</label>
+          <input
+            type="date"
+            min={format(new Date(), 'yyyy-MM-dd')}
+            value={selectedDate}
+            onChange={(e) => handleDateChange(e.target.value)}
+            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 text-sm"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Select Available Slot</label>
+          {loadingSlots ? (
+            <div className="py-6 text-center text-sm text-slate-500">Loading available slots...</div>
+          ) : selectedDate && availableSlots.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1">
+              {availableSlots.map((slot, index) => {
+                const isSelected = selectedSlot?.start === slot.start && selectedSlot?.end === slot.end;
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => setSelectedSlot(slot)}
+                    className={`py-2 px-3 text-xs font-medium rounded-lg border transition-colors ${
+                      isSelected
+                        ? 'bg-primary-600 text-white border-primary-600'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {slot.start} - {slot.end}
+                  </button>
+                );
+              })}
+            </div>
+          ) : selectedDate ? (
+            <div className="py-6 text-center text-sm text-slate-500 bg-slate-50 rounded-lg">
+              No available slots on this date.
+            </div>
+          ) : (
+            <div className="py-4 text-center text-xs text-slate-400">Please choose a date first</div>
+          )}
+        </div>
+
+        <div className="flex gap-2 justify-end pt-3 border-t">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-300 rounded-lg hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!selectedSlot || submitting}
+            onClick={handleConfirm}
+            className="px-4 py-2 text-sm font-medium bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {submitting ? 'Rescheduling...' : 'Confirm Reschedule'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
 
 // Appointment Card Component
-const AppointmentCard = ({ appointment, onCancel }) => {
+const AppointmentCard = ({ appointment, onCancel, onReschedule }) => {
   const doctor = appointment.doctorId;
   const doctorUser = doctor?.userId;
   const appointmentDate = parseISO(appointment.date);
@@ -244,6 +389,18 @@ const AppointmentCard = ({ appointment, onCancel }) => {
               Rate
             </button>
           )}
+
+          {/* Reschedule Button */}
+          {canCancel && (
+            <button 
+              onClick={() => onReschedule(appointment)}
+              className="px-4 py-2 bg-primary-100 text-primary-700 text-sm font-medium rounded-lg hover:bg-primary-200 transition-colors flex items-center gap-2"
+            >
+              <Calendar className="w-4 h-4" />
+              Reschedule
+            </button>
+          )}
+
           {canCancel && (
             <button 
               onClick={() => onCancel(appointment._id)}
@@ -255,7 +412,7 @@ const AppointmentCard = ({ appointment, onCancel }) => {
           )}
           {hoursUntil < 24 && hoursUntil > 0 && appointment.status === 'confirmed' && (
             <span className="text-xs text-amber-600">
-              Cancellation not allowed within 24 hours
+              Changes not allowed within 24 hours
             </span>
           )}
         </div>

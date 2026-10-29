@@ -406,7 +406,7 @@ const Register = () => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-primary-600 rounded-2xl mb-4 shadow-md">
             <Stethoscope className="w-8 h-8 text-white animate-pulse" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-800">MediBook</h1>
+          <h1 className="text-2xl font-bold text-slate-800">Healthcare</h1>
           <p className="text-slate-500 mt-1">Create your professional account</p>
         </div>
 
